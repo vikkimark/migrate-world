@@ -71,7 +71,7 @@ export default function SignUpPage() {
           providers={[]}
           // After the user clicks the email link, send them back to the home page for now.
           // (We’ll change this to /checklist after we build it.)
-          redirectTo={typeof window !== "undefined" ? `${window.location.origin}/` : undefined}
+	 redirectTo={typeof window !== "undefined" ? `${window.location.origin}/checklist` : 		 undefined}
         />
       </div>
 
