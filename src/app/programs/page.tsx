@@ -3,7 +3,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { supabase } from "@/lib/supabase";
 import { Button } from "@/components/ui/button";
-import Link from "next/link";
 
 type School = {
   id: number;
@@ -33,6 +32,7 @@ export default function ProgramsPage() {
   const [city, setCity] = useState<string>("");           // Ottawa / Toronto
   const [degree, setDegree] = useState<string>("");       // BSc / MSc / etc
   const [query, setQuery] = useState<string>("");         // free text
+  const [savingId, setSavingId] = useState<number | null>(null);
 
   useEffect(() => {
     let mounted = true;
@@ -72,6 +72,37 @@ export default function ProgramsPage() {
       return cityOk && degreeOk && queryOk;
     });
   }, [programs, schoolById, city, degree, query]);
+
+  async function handleSave(p: Program) {
+    setSavingId(p.id);
+    const { data: userData } = await supabase.auth.getUser();
+    const user = userData.user;
+    if (!user) {
+      setSavingId(null);
+      alert("Please sign in first. You’ll be redirected to Sign in.");
+      window.location.href = "/signup";
+      return;
+    }
+    const school = schoolById.get(p.school_id);
+    const title = `${p.name} — ${school?.name ?? ""}`;
+    const { error } = await supabase.from("checklist_items").insert([{
+      user_id: user.id,
+      type: "program",
+      ref_table: "programs",
+      ref_id: p.id,
+      title,
+      status: "todo",
+      due_date: null
+    }]);
+    setSavingId(null);
+    if (error) {
+      console.error("save program error:", error);
+      alert("Could not save. Please try again.");
+      return;
+    }
+    const go = confirm("Saved to your checklist. Open checklist now?");
+    if (go) window.location.href = "/checklist";
+  }
 
   return (
     <section>
@@ -134,6 +165,7 @@ export default function ProgramsPage() {
                 <th className="text-left py-2 pr-3">Tuition (Intl)</th>
                 <th className="text-left py-2 pr-3">Intakes</th>
                 <th className="text-left py-2 pr-3">Apply</th>
+                <th className="text-left py-2 pr-3">Save</th>
               </tr>
             </thead>
             <tbody>
@@ -157,11 +189,20 @@ export default function ProgramsPage() {
                         </a>
                       ) : "—"}
                     </td>
+                    <td className="py-2 pr-3">
+                      <Button
+                        size="sm"
+                        onClick={() => handleSave(p)}
+                        disabled={savingId === p.id}
+                      >
+                        {savingId === p.id ? "Saving…" : "Add to checklist"}
+                      </Button>
+                    </td>
                   </tr>
                 );
               })}
               {filtered.length === 0 && (
-                <tr><td colSpan={8} className="py-6 text-center text-zinc-500">No programs match your filters.</td></tr>
+                <tr><td colSpan={9} className="py-6 text-center text-zinc-500">No programs match your filters.</td></tr>
               )}
             </tbody>
           </table>
