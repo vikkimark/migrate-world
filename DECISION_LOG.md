@@ -34,3 +34,32 @@
 - Visa (country/purpose filters + save to checklist)
 - Signup (magic link) and Checklist (add/toggle/delete)
 - Header with auth status
+
+## Day 3 (Shipped)
+
+- Pages:
+  - **Housing** (curated links + “Add to checklist”)
+  - **Jobs** (curated searches + “Add to checklist”)
+  - **Shop** (winter + all-season essentials; Indian/Nigerian groceries; “Add to checklist”)
+  - **Start** (lead capture form → Supabase `leads`)
+
+- UX:
+  - Header nav: added **Start**, **Jobs**, **Shop**
+  - Home hero: clearer value copy; single **Start your plan** CTA (solid black)
+  - Toasts: success/error notifications via **sonner**
+
+- Data & Auth:
+  - `leads` table created; **RLS** enabled (anon **INSERT** only)
+  - Checklist: save from Programs/Visa/Housing/Jobs/Shop
+
+- SEO & Structure:
+  - Route metadata (titles/descriptions) standardized (no city/country in titles)
+  - **robots.txt** and **sitemap.xml** (now includes `/start`, `/terms`, `/privacy`)
+  - **Terms** and **Privacy** pages added; footer with links
+
+- Open items (carry to Week-1 list):
+  - Replace `hello@yourdomain.com` with real email
+  - Refine visa links (non-study categories) to exact IRCC deep links
+  - Add affiliate/partner URLs to Shop
+  - Add basic analytics (PostHog) for CTA clicks, signups, saves
+
