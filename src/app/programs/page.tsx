@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { supabase } from "@/lib/supabase";
 import { Button } from "@/components/ui/button";
+import { posthog } from "@/lib/analytics";
 
 type School = {
   id: number;
@@ -102,6 +103,8 @@ export default function ProgramsPage() {
     }
     const go = confirm("Saved to your checklist. Open checklist now?");
     if (go) window.location.href = "/checklist";
+    
+    posthog.capture("saved_to_checklist", { type: "program", ref_table: "programs", ref_id: p.id });
   }
 
   return (

@@ -3,6 +3,7 @@
 import { useMemo, useState } from "react";
 import { supabase } from "@/lib/supabase";
 import { Button } from "@/components/ui/button";
+import { posthog } from "@/lib/analytics";
 
 type Housing = {
   id: string;
@@ -104,6 +105,8 @@ export default function HousingPage() {
     }
     const go = confirm("Saved to your checklist. Open checklist now?");
     if (go) window.location.href = "/checklist";
+
+    posthog.capture("saved_to_checklist", { type: "housing", ref_table: "external_housing", ref_id:           	h.id });
   }
 
   return (

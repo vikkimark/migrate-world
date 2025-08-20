@@ -1,5 +1,7 @@
+'use client';
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
+import { posthog } from "@/lib/analytics";
 
 export default function Home() {
   return (
@@ -15,6 +17,7 @@ export default function Home() {
       <div className="mt-6 flex gap-3 lg=b">
   	<Link
     	   href="/start"
+  	   onClick={() => posthog.capture("cta_start_plan_click", { location: "home_hero" })}
     	   className="inline-block rounded px-4 py-2 bg-black text-white hover:bg-black/90 		   focus:outline-none focus:ring-2 focus:ring-black/40">
    	   Start your plan
  	 </Link>

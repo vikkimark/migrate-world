@@ -3,6 +3,8 @@
 import { useEffect, useMemo, useState } from "react";
 import { supabase } from "@/lib/supabase";
 import { Button } from "@/components/ui/button";
+import { posthog } from "@/lib/analytics";
+
 
 type VisaLink = {
   id: number;
@@ -79,6 +81,8 @@ export default function VisaPage() {
     }
     const go = confirm("Saved to your checklist. Open checklist now?");
     if (go) window.location.href = "/checklist";
+
+    posthog.capture("saved_to_checklist", { type: "visa", ref_table: "visa_links", ref_id: v.id });
   }
 
   return (

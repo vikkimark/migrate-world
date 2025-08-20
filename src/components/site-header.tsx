@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useEffect, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { supabase } from "@/lib/supabase";
+import { posthog } from "@/lib/analytics";
 
 export default function SiteHeader() {
   const [email, setEmail] = useState<string | null>(null);
@@ -19,8 +20,15 @@ export default function SiteHeader() {
 
     // Subscribe to auth changes (login/logout)
     const { data: sub } = supabase.auth.onAuthStateChange((_event, session) => {
-      setEmail(session?.user?.email ?? null);
-    });
+const email = session?.user?.email ?? null;
+  const uid = session?.user?.id ?? null;
+  setEmail(email);
+
+  if (uid) {
+    posthog.identify(uid, email ? { email } : undefined);
+  } else {
+    posthog.reset();
+  }    });
 
     return () => {
       mounted = false;
@@ -47,6 +55,7 @@ export default function SiteHeader() {
         </Link>
 
         <nav className="flex items-center gap-4">
+	  <Link href="/start" className="text-sm hover:underline">Start</Link>
           <Link href="/programs" className="text-sm hover:underline">Programs</Link>
           <Link href="/housing" className="text-sm hover:underline">Housing</Link>
 	  <Link href="/jobs" className="text-sm hover:underline">Jobs</Link>
