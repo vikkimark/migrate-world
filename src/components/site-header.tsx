@@ -49,6 +49,7 @@ export default function SiteHeader() {
         <nav className="flex items-center gap-4">
           <Link href="/programs" className="text-sm hover:underline">Programs</Link>
           <Link href="/housing" className="text-sm hover:underline">Housing</Link>
+	  <Link href="/jobs" className="text-sm hover:underline">Jobs</Link>
           <Link href="/visa" className="text-sm hover:underline">Visa</Link>
           <Link href="/checklist" className="text-sm hover:underline">Checklist</Link>
 
