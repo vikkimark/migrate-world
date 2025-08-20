@@ -1,9 +1,8 @@
 'use client';
-
+import { posthog } from "@/lib/analytics";
 import { useEffect, useMemo, useState } from "react";
 import { supabase } from "@/lib/supabase";
 import { Button } from "@/components/ui/button";
-import { posthog } from "@/lib/analytics";
 
 
 type VisaLink = {
@@ -54,36 +53,55 @@ export default function VisaPage() {
   }, [links, from, purpose]);
 
   async function handleSave(v: VisaLink) {
-    setSavingId(v.id);
-    const { data: userData } = await supabase.auth.getUser();
-    const user = userData.user;
-    if (!user) {
-      setSavingId(null);
-      alert("Please sign in first. You’ll be redirected to Sign in.");
-      window.location.href = "/signup";
-      return;
-    }
-    const title = `${v.purpose} — ${v.country_from} → ${v.country_to}`;
-    const { error } = await supabase.from("checklist_items").insert([{
-      user_id: user.id,
-      type: "visa",
-      ref_table: "visa_links",
-      ref_id: v.id,
-      title,
-      status: "todo",
-      due_date: null
-    }]);
-    setSavingId(null);
-    if (error) {
-      console.error("save visa error:", error);
-      alert("Could not save. Please try again.");
-      return;
-    }
-    const go = confirm("Saved to your checklist. Open checklist now?");
-    if (go) window.location.href = "/checklist";
+  setSavingId(v.id);
 
-    posthog.capture("saved_to_checklist", { type: "visa", ref_table: "visa_links", ref_id: v.id });
+  const { data: userData } = await supabase.auth.getUser();
+  const user = userData.user;
+  if (!user) {
+    setSavingId(null);
+    alert("Please sign in first. You’ll be redirected to Sign in.");
+    window.location.href = "/signup";
+    return;
   }
+
+  const title = `${v.purpose} — ${v.country_from} → ${v.country_to}`;
+
+  // 1) Save to checklist (DB)
+  const { error } = await supabase.from("checklist_items").insert([{
+    user_id: user.id,
+    type: "visa",
+    ref_table: "visa_links",
+    ref_id: v.id,
+    title,
+    status: "todo",
+    due_date: null
+  }]);
+
+  setSavingId(null);
+
+  if (error) {
+    console.error("save visa error:", error);
+    alert("Could not save. Please try again.");
+    return;
+  }
+
+  //  Analytics event
+  posthog.capture("saved_to_checklist", {
+    type: "visa",
+    ref_table: "visa_links",
+    ref_id: v.id,
+  });
+
+  // 3) Ask to open checklist, FLUSH before navigating
+  const go = confirm("Saved to your checklist. Open checklist now?");
+  if (go) {
+    posthog.flush(() => {
+      window.location.href = "/checklist";
+    });
+  } else {
+    posthog.flush();
+  }
+}
 
   return (
     <section>
@@ -159,9 +177,9 @@ export default function VisaPage() {
         requirements and deadlines on the official portal.
       </p>
 
-      <div className="mt-4 text-xs">
-        See something wrong? Email <a className="underline" href="mailto:hello@yourdomain.com">hello@yourdomain.com</a> with the correct link.
-      </div>
+	<div className="mt-4 text-xs">
+  	See something wrong? <a className="underline" href="/contact">Send us a message</a> with the 	correct link.
+	</div>
     </section>
   );
 }

@@ -6,7 +6,7 @@ export default function SiteFooter() {
         <nav className="flex gap-4">
           <a className="hover:underline" href="/terms">Terms</a>
           <a className="hover:underline" href="/privacy">Privacy</a>
-          <a className="hover:underline" href="mailto:hello@yourdomain.com">Contact</a>
+          <a className="hover:underline" href="/contact">Contact</a> {/* ← changed */}
         </nav>
       </div>
     </footer>
