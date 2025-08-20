@@ -1,9 +1,8 @@
 import type { Metadata } from "next";
 
 export const metadata: Metadata = {
-  title: "Shop Essentials for Moving to Canada",
-  description:
-    "All-season and winter essentials plus Indian/Nigerian groceries and major chains. Open Amazon/Maps links and save items to your checklist.",
+  title: "Shop",
+  description: "All-season and winter essentials plus Indian/Nigerian groceries and major chains. Save items to your checklist.",
   alternates: { canonical: "https://migrate-world.vercel.app/shop" },
 };
 
