@@ -51,6 +51,7 @@ export default function SiteHeader() {
           <Link href="/housing" className="text-sm hover:underline">Housing</Link>
 	  <Link href="/jobs" className="text-sm hover:underline">Jobs</Link>
           <Link href="/visa" className="text-sm hover:underline">Visa</Link>
+	  <Link href="/shop" className="text-sm hover:underline">Shop</Link>
           <Link href="/checklist" className="text-sm hover:underline">Checklist</Link>
 
           {email ? (
