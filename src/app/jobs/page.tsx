@@ -1,9 +1,9 @@
 'use client';
-
+import { posthog } from "@/lib/analytics";
 import { useMemo, useState } from "react";
 import { supabase } from "@/lib/supabase";
 import { Button } from "@/components/ui/button";
-import { posthog } from "@/lib/analytics";
+import { sleep } from "@/lib/sleep";
 
 type JobItem = {
   id: string;
@@ -116,7 +116,8 @@ export default function JobsPage() {
       return;
     }
     const go = confirm("Saved to your checklist. Open checklist now?");
-    if (go) window.location.href = "/checklist";
+    if (go) await sleep(250);
+    window.location.href = "/checklist";
 
     posthog.capture("saved_to_checklist", { type: "job", ref_table: "external_jobs", ref_id: j.id });
 

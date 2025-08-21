@@ -1,9 +1,9 @@
 'use client';
-
+import { posthog } from "@/lib/analytics";
 import { useEffect, useMemo, useState } from "react";
 import { supabase } from "@/lib/supabase";
 import { Button } from "@/components/ui/button";
-import { posthog } from "@/lib/analytics";
+import { sleep } from "@/lib/sleep";
 
 type School = {
   id: number;
@@ -101,11 +101,20 @@ export default function ProgramsPage() {
       alert("Could not save. Please try again.");
       return;
     }
-    const go = confirm("Saved to your checklist. Open checklist now?");
-    if (go) window.location.href = "/checklist";
-    
-    posthog.capture("saved_to_checklist", { type: "program", ref_table: "programs", ref_id: p.id });
-  }
+	// fire event
+	posthog.capture("saved_to_checklist", {
+ 	 type: "program",
+ 	 ref_table: "programs",
+  	 ref_id: p.id,
+	 });
+
+	const go = confirm("Saved to your checklist. Open checklist now?");
+	if (go) {
+  	await sleep(250);         // give the capture a moment to send
+  	window.location.href = "/checklist";
+	}
+
+      }
 
   return (
     <section>

@@ -3,6 +3,7 @@ import { posthog } from "@/lib/analytics";
 import { useEffect, useMemo, useState } from "react";
 import { supabase } from "@/lib/supabase";
 import { Button } from "@/components/ui/button";
+import { sleep } from "@/lib/sleep";
 
 
 type VisaLink = {
@@ -92,15 +93,12 @@ export default function VisaPage() {
     ref_id: v.id,
   });
 
-  // 3) Ask to open checklist, FLUSH before navigating
-  const go = confirm("Saved to your checklist. Open checklist now?");
-  if (go) {
-    posthog.flush(() => {
-      window.location.href = "/checklist";
-    });
-  } else {
-    posthog.flush();
-  }
+const go = confirm("Saved to your checklist. Open checklist now?");
+if (go) {
+  await sleep(250);         // give the capture a moment to send
+  window.location.href = "/checklist";
+}
+
 }
 
   return (
