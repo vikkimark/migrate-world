@@ -26,7 +26,6 @@ export default function ChecklistPage() {
   const [dueDate, setDueDate] = useState<string>("");
 
   useEffect(() => {
-    let mounted = true;
     (async () => {
       const { data: userData } = await supabase.auth.getUser();
       const user = userData.user ?? null;
@@ -39,7 +38,6 @@ export default function ChecklistPage() {
 
       await refresh(user.id);
     })();
-    return () => { mounted = false; };
   }, []);
 
   async function refresh(userId?: string) {
