@@ -1,6 +1,6 @@
 // src/app/api/copilot/route.ts
 import { NextResponse, type NextRequest } from "next/server";
-import OpenAI, { type ChatCompletionMessageParam } from "openai";
+import OpenAI from "openai";
 import { createClient } from "@supabase/supabase-js";
 
 const SYSTEM_PROMPT = `
@@ -48,6 +48,7 @@ type KBChunk = {
   title: string;
   content: string | null;
 };
+type ChatMsg = { role: "system" | "user" | "assistant"; content: string };
 
 function toTask(x: unknown): Task | null {
   if (!x || typeof x !== "object") return null;
@@ -144,18 +145,27 @@ export async function POST(req: NextRequest) {
 
     // --- chat call ---
     const openai = new OpenAI({ apiKey: OPENAI_API_KEY });
-    const messages: ChatCompletionMessageParam[] = [
-      { role: "system", content: SYSTEM_PROMPT },
-      ...(contextBlock ? [{ role: "system", content: contextBlock }] : []),
-      ...history,
-      { role: "user", content: message },
-    ];
+const ctxMsgs: ChatMsg[] = contextBlock
+  ? [{ role: "system", content: contextBlock }]
+  : [];
 
-    const completion = await openai.chat.completions.create({
-      model: process.env.OPENAI_CHAT_MODEL || "gpt-4o-mini",
-      temperature: 0.2,
-      messages,
-    });
+const messages: ChatMsg[] = [
+  { role: "system", content: SYSTEM_PROMPT },
+  ...ctxMsgs,
+  ...(history as ChatMsg[]),
+  { role: "user", content: message },
+];
+
+const requested = process.env.OPENAI_CHAT_MODEL || "gpt-4o-mini";
+const ALLOWED = new Set(["gpt-4o-mini","gpt-4o"]);
+const chatModel = ALLOWED.has(requested) ? requested : "gpt-4o-mini";
+
+const completion = await openai.chat.completions.create({
+  model: chatModel,
+  temperature: 0.2,
+  messages,
+});
+
 
     const reply = completion.choices?.[0]?.message?.content ?? "";
     const tasks = extractTasks(reply);
