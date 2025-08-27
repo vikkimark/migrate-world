@@ -45,9 +45,10 @@ function extractTasks(reply: string): Task[] {
   };
 
   try {
-    // fenced ```json ... ```
+    // Try fenced ```json ... ```
     const fenced = reply.match(/```json([\s\S]*?)```/i);
     let raw = fenced ? fenced[1].trim() : "";
+    // Fallback: trailing {...}
     if (!raw) {
       const lastBrace = reply.lastIndexOf("{");
       if (lastBrace !== -1) {
@@ -104,7 +105,7 @@ export async function POST(req: NextRequest) {
     matches = [];
   }
 
-  // Optional inline context (short)
+  // Optional inline context
   const contextBlock = matches.length
     ? "Context:\n" + matches.map((m, i) => `[${i + 1}] ${m.title} — ${m.url}`).join("\n")
     : "";
@@ -117,7 +118,7 @@ export async function POST(req: NextRequest) {
     { role: "user", content: message },
   ];
 
-  // Call OpenAI via fetch (avoids SDK type friction)
+  // Call OpenAI via fetch (keeps types simple)
   const resp = await fetch("https://api.openai.com/v1/chat/completions", {
     method: "POST",
     headers: {
@@ -138,9 +139,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: msg || "OpenAI error" }, { status: 502 });
   }
 
-  const data = (await resp.json()) as {
-    choices?: { message?: { content?: string } }[];
-  };
+  const data = (await resp.json()) as { choices?: { message?: { content?: string } }[] };
   const reply = data?.choices?.[0]?.message?.content ?? "";
 
   // Extract tasks + compact sources
