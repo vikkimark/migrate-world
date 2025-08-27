@@ -1,18 +1,25 @@
 // src/app/api/copilot/route.ts
 import { NextResponse, type NextRequest } from "next/server";
-import OpenAI from "openai";
 import { createClient } from "@supabase/supabase-js";
+
+type Role = "system" | "user" | "assistant";
+type ChatMsg = { role: Role; content: string };
+type Task = {
+  title: string;
+  type: "visa" | "housing" | "program" | "job" | "shop" | "flight" | "travel" | "health" | "education" | "custom";
+  due_date: string | null;
+};
+type KBChunk = { id: number; title: string; url: string; content: string };
+type Source = { n: number; title: string; url: string };
 
 const SYSTEM_PROMPT = `
 You are the Migrate World Copilot.
 Mission: Provide precise, verified guidance for relocation (programs, visas, housing, jobs, essentials).
 Rules:
-- If you have verified context or official sources, answer concisely and cite links inline like [1], [2].
-- If you are not certain, SAY YOU'RE NOT SURE and ask for clarification or state which source is needed.
-- Never invent or guess. Prefer official gov/university pages and well-known platforms.
-- Use short, step-by-step lists when appropriate.
-
-When your reply implies next steps, append a JSON block **at the very end** in a fenced code block:
+- Cite official or trusted sources inline when relevant.
+- If not certain, say you're not sure and ask for the needed detail.
+- Use concise step-by-step lists when helpful.
+- At the very end, append a JSON task block in a single fenced code block:
 
 \`\`\`json
 {"tasks":[
@@ -21,190 +28,127 @@ When your reply implies next steps, append a JSON block **at the very end** in a
 ]}
 \`\`\`
 
-- Always use a fenced block exactly as above (start with \`\`\`json, end with \`\`\`).
-- Do not include any other fenced blocks in the same reply.
-- Keep 3–7 tasks max.
-`;
-
-type Task = {
-  title: string;
-  type:
-    | "visa"
-    | "housing"
-    | "program"
-    | "job"
-    | "shop"
-    | "flight"
-    | "travel"
-    | "health"
-    | "education"
-    | "custom";
-  due_date: string | null;
-};
-
-type KBChunk = {
-  id: number;
-  url: string;
-  title: string;
-  content: string | null;
-};
-type ChatMsg = { role: "system" | "user" | "assistant"; content: string };
-
-function toTask(x: unknown): Task | null {
-  if (!x || typeof x !== "object") return null;
-  const obj = x as Record<string, unknown>;
-  const title = typeof obj.title === "string" ? obj.title : "";
-  const valid = [
-    "visa",
-    "housing",
-    "program",
-    "job",
-    "shop",
-    "flight",
-    "travel",
-    "health",
-    "education",
-    "custom",
-  ] as const;
-  const t = typeof obj.type === "string" ? obj.type : "custom";
-  const type: Task["type"] = (valid as readonly string[]).includes(t as string)
-    ? (t as Task["type"])
-    : "custom";
-  const rawDue = obj.due_date;
-  const due_date = typeof rawDue === "string" ? rawDue : null;
-  if (!title) return null;
-  return { title, type, due_date };
-}
+Keep 3–7 tasks max; one fenced block only.
+`.trim();
 
 function extractTasks(reply: string): Task[] {
+  const valid: Task["type"][] = ["visa","housing","program","job","shop","flight","travel","health","education","custom"];
+  const toTask = (x: unknown): Task | null => {
+    if (!x || typeof x !== "object") return null;
+    const o = x as Record<string, unknown>;
+    const title = typeof o.title === "string" ? o.title : "";
+    const typeStr = typeof o.type === "string" ? o.type : "custom";
+    const type = (valid as readonly string[]).includes(typeStr) ? (typeStr as Task["type"]) : "custom";
+    const rawDue = o.due_date;
+    const due_date = typeof rawDue === "string" ? rawDue : null;
+    return title ? { title, type, due_date } : null;
+  };
+
   try {
     // fenced ```json ... ```
     const fenced = reply.match(/```json([\s\S]*?)```/i);
     let raw = fenced ? fenced[1].trim() : "";
-    // fallback: trailing { ... } at end
     if (!raw) {
-      const i = reply.lastIndexOf("{");
-      if (i !== -1) {
-        const tail = reply.slice(i).trim();
-        if (tail.endsWith("}")) raw = tail;
+      const lastBrace = reply.lastIndexOf("{");
+      if (lastBrace !== -1) {
+        const candidate = reply.slice(lastBrace).trim();
+        if (candidate.endsWith("}")) raw = candidate;
       }
     }
     if (!raw) return [];
-    const parsed: unknown = JSON.parse(raw);
-    if (typeof parsed === "object" && parsed !== null && "tasks" in parsed) {
-      const arr = Array.isArray((parsed as { tasks?: unknown }).tasks)
-        ? ((parsed as { tasks?: unknown[] }).tasks as unknown[])
-        : [];
-      return arr.map(toTask).filter((t): t is Task => t !== null);
-    }
-    return [];
+    const parsed = JSON.parse(raw) as unknown;
+    const arr = (parsed && typeof parsed === "object" && "tasks" in (parsed as Record<string, unknown>))
+      ? (parsed as { tasks?: unknown[] }).tasks
+      : [];
+    if (!Array.isArray(arr)) return [];
+    return arr.map(toTask).filter((t): t is Task => t !== null);
   } catch {
     return [];
   }
 }
 
 export async function POST(req: NextRequest) {
+  // Env checks
+  const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
+  if (!OPENAI_API_KEY) {
+    return NextResponse.json({ error: "Missing OPENAI_API_KEY" }, { status: 500 });
+  }
+  const SB_URL = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  const SB_ANON = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+  if (!SB_URL || !SB_ANON) {
+    return NextResponse.json({ error: "Missing Supabase env" }, { status: 500 });
+  }
+  const sb = createClient(SB_URL, SB_ANON);
+
+  // Input
+  const body = await req.json().catch(() => ({} as unknown));
+  const { message, history = [] as ChatMsg[] } = (body ?? {}) as {
+    message?: string;
+    history?: ChatMsg[];
+  };
+  if (!message || typeof message !== "string") {
+    return NextResponse.json({ error: "Missing 'message' string" }, { status: 400 });
+  }
+
+  // Simple text search over kb_chunks (works without embeddings)
+  let matches: KBChunk[] = [];
   try {
-    // --- env guards ---
-    const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
-    const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL;
-    const SUPABASE_ANON = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
-    if (!OPENAI_API_KEY)
-      return NextResponse.json({ error: "Missing OPENAI_API_KEY" }, { status: 500 });
-    if (!SUPABASE_URL || !SUPABASE_ANON)
-      return NextResponse.json({ error: "Missing Supabase env" }, { status: 500 });
-
-    // --- body ---
-    const body = (await req.json().catch(() => ({}))) as {
-      message?: string;
-      history?: { role: "user" | "assistant" | "system"; content: string }[];
-    };
-    const message = body.message;
-    const history = body.history ?? [];
-    if (!message || typeof message !== "string") {
-      return NextResponse.json({ error: "Missing 'message' string" }, { status: 400 });
-    }
-
-    // --- retrieval (text search; embeddings OFF path) ---
-    const sb = createClient(SUPABASE_URL, SUPABASE_ANON);
-    const q = message.split(/\s+/).slice(0, 4).join("%");
-    const { data: matchesRaw } = await sb
+    const q = message.split(/\s+/).slice(0, 5).join("%");
+    const { data } = await sb
       .from("kb_chunks")
-      .select("id,url,title,content")
+      .select("id,title,url,content")
       .or(`content.ilike.%${q}%,title.ilike.%${q}%`)
       .limit(5);
-    const matches = (matchesRaw ?? []) as KBChunk[];
-
-    const sourceLines = matches.map((m, i) => `[${i + 1}] ${m.title} — ${m.url}`);
-    const contextSnips = matches.map(
-      (m, i) => `[${i + 1}] ${(m.content ?? "").slice(0, 800)}`
-    );
-    const contextBlock =
-      (sourceLines.length ? `Sources:\n${sourceLines.join("\n")}\n\n` : "") +
-      (contextSnips.length ? `Context:\n${contextSnips.join("\n\n")}` : "");
-
-    // --- chat call ---
-    const openai = new OpenAI({ apiKey: OPENAI_API_KEY });
-const ctxMsgs: ChatMsg[] = contextBlock
-  ? [{ role: "system", content: contextBlock }]
-  : [];
-
-const messages: ChatMsg[] = [
-  { role: "system", content: SYSTEM_PROMPT },
-  ...ctxMsgs,
-  ...(history as ChatMsg[]),
-  { role: "user", content: message },
-];
-
-const requested = process.env.OPENAI_CHAT_MODEL || "gpt-4o-mini";
-const ALLOWED = new Set(["gpt-4o-mini","gpt-4o"]);
-const chatModel = ALLOWED.has(requested) ? requested : "gpt-4o-mini";
-
-const completion = await openai.chat.completions.create({
-  model: chatModel,
-  temperature: 0.2,
-  messages,
-});
-
-
-    const reply = completion.choices?.[0]?.message?.content ?? "";
-    const tasks = extractTasks(reply);
-    const sources = matches.map((m, i) => ({ n: i + 1, title: m.title, url: m.url }));
-
-// Build a compact sources list from `matches` (already computed above)
-type Source = { n: number; title: string; url: string };
-const sources: Source[] = (Array.isArray(matches) ? matches : [])
-  .map((m: { title?: string; url?: string }, i: number) => ({
-    n: i + 1,
-    title: (m?.title || "").slice(0, 120) || "Source",
-    url: m?.url || "",
-  }))
-  // filter out blanks/dupes by URL
-  .filter((s, idx, arr) => s.url && idx === arr.findIndex(t => t.url === s.url))
-  .slice(0, 5);
-
-return NextResponse.json({ reply, tasks, sources });
-  } catch (err: unknown) {
-    // sanitized server-log; no secrets leaked to client
-    let status: number | undefined;
-    let code: string | undefined;
-    let msg = "";
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const e = err as any;
-    if (e && typeof e === "object") {
-      status = typeof e.status === "number" ? e.status : undefined;
-      code = typeof e.code === "string" ? e.code : undefined;
-      msg = typeof e.message === "string" ? e.message.slice(0, 140) : "";
-    }
-    console.error("copilot error", {
-      status,
-      code,
-      msg,
-      keyPrefix: (process.env.OPENAI_API_KEY ?? "").slice(0, 6),
-    });
-    return NextResponse.json(
-      { error: "Copilot is temporarily unavailable. Please try again." },
-      { status: 500 }
-    );
+    matches = (data ?? []).filter((m): m is KBChunk => !!m && typeof m.title === "string" && typeof m.url === "string");
+  } catch {
+    matches = [];
   }
+
+  // Optional inline context (short)
+  const contextBlock = matches.length
+    ? "Context:\n" + matches.map((m, i) => `[${i + 1}] ${m.title} — ${m.url}`).join("\n")
+    : "";
+
+  // Build chat messages
+  const messages: ChatMsg[] = [
+    { role: "system", content: SYSTEM_PROMPT },
+    ...(contextBlock ? [{ role: "system", content: contextBlock }] as ChatMsg[] : []),
+    ...history,
+    { role: "user", content: message },
+  ];
+
+  // Call OpenAI via fetch (avoids SDK type friction)
+  const resp = await fetch("https://api.openai.com/v1/chat/completions", {
+    method: "POST",
+    headers: {
+      "Authorization": `Bearer ${OPENAI_API_KEY}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      model: "gpt-4o-mini",
+      temperature: 0.2,
+      messages,
+    }),
+  });
+
+  if (!resp.ok) {
+    const raw = await resp.text();
+    let msg = raw;
+    try { const j = JSON.parse(raw) as { error?: { message?: string } }; if (j?.error?.message) msg = j.error.message; } catch {}
+    return NextResponse.json({ error: msg || "OpenAI error" }, { status: 502 });
+  }
+
+  const data = (await resp.json()) as {
+    choices?: { message?: { content?: string } }[];
+  };
+  const reply = data?.choices?.[0]?.message?.content ?? "";
+
+  // Extract tasks + compact sources
+  const tasks = extractTasks(reply);
+  const sources: Source[] = matches
+    .map((m, i) => ({ n: i + 1, title: (m.title || "").slice(0, 120) || "Source", url: m.url || "" }))
+    .filter((s, idx, arr) => s.url && idx === arr.findIndex(t => t.url === s.url))
+    .slice(0, 5);
+
+  return NextResponse.json({ reply, tasks, sources });
 }
