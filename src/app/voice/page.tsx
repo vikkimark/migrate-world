@@ -10,12 +10,6 @@ interface SpeechRecognitionEventResult {
   0: { transcript: string; confidence?: number };
   isFinal: boolean;
 }
-interface SpeechRecognitionEventMap {
-  result: SpeechRecognitionEvent;
-  start: Event;
-  end: Event;
-  error: Event;
-}
 interface SpeechRecognitionEvent extends Event {
   resultIndex: number;
   results: {
@@ -42,7 +36,7 @@ declare global {
   interface Window {
     SpeechRecognition?: SpeechRecognitionConstructor;
     webkitSpeechRecognition?: SpeechRecognitionConstructor;
-    speechSynthesis: SpeechSynthesis;
+    // Do NOT redeclare `speechSynthesis` here; it's already in lib.dom.d.ts
   }
 }
 
