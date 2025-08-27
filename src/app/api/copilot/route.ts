@@ -171,7 +171,19 @@ const completion = await openai.chat.completions.create({
     const tasks = extractTasks(reply);
     const sources = matches.map((m, i) => ({ n: i + 1, title: m.title, url: m.url }));
 
-    return NextResponse.json({ reply, tasks, sources });
+// Build a compact sources list from `matches` (already computed above)
+type Source = { n: number; title: string; url: string };
+const sources: Source[] = (Array.isArray(matches) ? matches : [])
+  .map((m: { title?: string; url?: string }, i: number) => ({
+    n: i + 1,
+    title: (m?.title || "").slice(0, 120) || "Source",
+    url: m?.url || "",
+  }))
+  // filter out blanks/dupes by URL
+  .filter((s, idx, arr) => s.url && idx === arr.findIndex(t => t.url === s.url))
+  .slice(0, 5);
+
+return NextResponse.json({ reply, tasks, sources });
   } catch (err: unknown) {
     // sanitized server-log; no secrets leaked to client
     let status: number | undefined;
