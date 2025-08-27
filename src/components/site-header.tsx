@@ -63,7 +63,7 @@ const email = session?.user?.email ?? null;
 	  <Link href="/shop" className="text-sm hover:underline">Shop</Link>
           <Link href="/checklist" className="text-sm hover:underline">Checklist</Link>
 	  <Link href="/copilot" className="text-sm hover:underline">Copilot</Link>
-
+          <a href="/voice" className="text-sm text-zinc-600 hover:text-zinc-900">Voice</a>
           {email ? (
             <>
               <span className="hidden sm:inline text-xs text-zinc-600">
