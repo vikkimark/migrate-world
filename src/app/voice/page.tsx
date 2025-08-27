@@ -1,6 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import { posthog } from "@/lib/analytics";
 
 type Role = "user" | "assistant";
 type Msg = { role: Role; content: string };
@@ -151,17 +152,25 @@ export default function VoicePage() {
               <div className="mt-2 text-xs text-zinc-600">
                 <span className="mr-2">Sources:</span>
                 {lastSources.map((s) => (
-                  <a
-                    key={s.n}
-                    href={s.url}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    title={s.title}
-                    className="underline mr-2"
-                  >
-                    [{s.n}]
-                  </a>
-                ))}
+  <a
+    key={s.n}
+    href={s.url}
+    target="_blank"
+    rel="noopener noreferrer"
+    title={s.title}
+    className="underline mr-2"
+    onClick={() =>
+      posthog.capture("copilot_source_click", {
+        n: s.n,
+        url: s.url,
+        title: s.title,
+        page: "voice",
+      })
+    }
+  >
+    [{s.n}]
+  </a>
+))}
               </div>
             )}
           </div>
