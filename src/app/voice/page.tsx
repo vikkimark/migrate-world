@@ -151,7 +151,7 @@ export default function VoicePage() {
             {idx === messages.length - 1 && m.role === "assistant" && lastSources.length > 0 && (
               <div className="mt-2 text-xs text-zinc-600">
                 <span className="mr-2">Sources:</span>
-                {lastSources.map((s) => (
+{lastSources.map((s) => (
   <a
     key={s.n}
     href={s.url}
@@ -159,23 +159,26 @@ export default function VoicePage() {
     rel="noopener noreferrer"
     title={s.title}
     className="underline mr-2"
-    onClick={() =>
-      posthog.capture("copilot_source_click", {
-        n: s.n,
-        url: s.url,
-        title: s.title,
-        page: "voice",
-      })
-    }
+    onMouseDown={() => trackSourceClick(s)}
   >
     [{s.n}]
   </a>
 ))}
+
               </div>
             )}
           </div>
         ))}
       </div>
+const trackSourceClick = (s: Source) => {
+  try {
+    posthog.capture(
+      "copilot_source_click",
+      { n: s.n, url: s.url, title: s.title, page: "voice" },
+      { send_instantly: true } // bypass batching
+    );
+  } catch {}
+};
 
       <div className="mt-3 flex gap-2">
         <input
