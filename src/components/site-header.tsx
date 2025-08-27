@@ -62,6 +62,7 @@ const email = session?.user?.email ?? null;
           <Link href="/visa" className="text-sm hover:underline">Visa</Link>
 	  <Link href="/shop" className="text-sm hover:underline">Shop</Link>
           <Link href="/checklist" className="text-sm hover:underline">Checklist</Link>
+	  <Link href="/copilot" className="text-sm hover:underline">Copilot</Link>
 
           {email ? (
             <>

@@ -60,7 +60,7 @@ export default function SignUpPage() {
     <section className="max-w-md">
       <h1 className="text-2xl font-semibold tracking-tight">Sign in</h1>
       <p className="mt-2 text-zinc-600">
-        Enter your email to get a magic link.
+        Enter your email and we’ll send you a magic link to sign in.
       </p>
 
       <div className="mt-6">

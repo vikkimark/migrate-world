@@ -4,6 +4,20 @@ import { useState } from "react";
 import { supabase } from "@/lib/supabase";
 import { toast } from "sonner";
 
+function stripJsonTasks(text: string) {
+  // remove fenced ```json ... ``` blocks
+  let out = text.replace(/```json[\s\S]*?```/gi, "").replace(/```[\s\S]*?```/g, "");
+  // also remove a trailing single JSON object if the model appended it without fences
+  const lastBrace = out.lastIndexOf("{");
+  if (lastBrace !== -1) {
+    const tail = out.slice(lastBrace).trim();
+    if (tail.startsWith("{") && tail.endsWith("}")) {
+      out = out.slice(0, lastBrace);
+    }
+  }
+  return out.trim();
+}
+
 function linkify(text: string) {
   const parts = text.split(/(https?:\/\/[^\s)]+)|(\n)/g);
   return parts.map((p, i) => {
@@ -113,7 +127,7 @@ const data: { reply: string; tasks: Task[] } = await res.json();
           {messages.map((m, i) => (
             <div key={i} className={m.role === "user" ? "text-right" : ""}>
               <div className={`inline-block rounded px-3 py-2 ${m.role === "user" ? "bg-black text-white" : "bg-zinc-100"}`}>
- 	      {linkify(m.content)}
+	       {linkify(stripJsonTasks(m.content))}
               </div>
             </div>
           ))}
