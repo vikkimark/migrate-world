@@ -1,13 +1,29 @@
-// src/app/voice/page.tsx
 'use client';
 
 import { useCallback, useEffect, useRef, useState } from "react";
 
 type Role = "user" | "assistant";
 type Msg = { role: Role; content: string };
+
 type Source = { n: number; title: string; url: string };
 type Task = { title: string; type: string; due_date: string | null };
 type CopilotResponse = { reply: string; tasks?: Task[]; sources?: Source[]; error?: string };
+
+/** Minimal Web Speech types (no "any", no global augmentation) */
+type SpeechRecognitionEventLike = {
+  results: ArrayLike<{ 0: { transcript: string } }>;
+};
+type SpeechRecognitionInstance = {
+  lang: string;
+  interimResults: boolean;
+  maxAlternatives: number;
+  onresult: (e: SpeechRecognitionEventLike) => void;
+  onend: () => void;
+  onerror: () => void;
+  start: () => void;
+  stop: () => void;
+};
+type SpeechRecognitionConstructor = new () => SpeechRecognitionInstance;
 
 export default function VoicePage() {
   const [messages, setMessages] = useState<Msg[]>([
@@ -18,62 +34,27 @@ export default function VoicePage() {
   const [lastSources, setLastSources] = useState<Source[]>([]);
   const [recording, setRecording] = useState(false);
 
-  // Optional: basic speech synthesis for assistant replies
+  // Speak assistant replies (if supported)
   const speak = useCallback((text: string) => {
     if (typeof window === "undefined") return;
     if (!("speechSynthesis" in window)) return;
     const utter = new SpeechSynthesisUtterance(text);
-    window.speechSynthesis.cancel(); // stop anything playing
+    window.speechSynthesis.cancel();
     window.speechSynthesis.speak(utter);
   }, []);
 
-  // Optional: basic speech recognition (webkitSpeechRecognition)
-  const recRef = useRef<SpeechRecognition | null>(null);
-  const startRecording = useCallback(() => {
-    if (typeof window === "undefined") return;
-    const anyWin = window as unknown as {
-      webkitSpeechRecognition?: new () => SpeechRecognition;
-      SpeechRecognition?: new () => SpeechRecognition;
-    };
-    const Ctor = anyWin.SpeechRecognition || anyWin.webkitSpeechRecognition;
-    if (!Ctor) {
-      alert("Speech recognition not supported in this browser.");
-      return;
-    }
-    const rec = new Ctor();
-    rec.lang = "en-US";
-    rec.interimResults = false;
-    rec.maxAlternatives = 1;
-    rec.onresult = (e: SpeechRecognitionEvent) => {
-      const transcript = e.results?.[0]?.[0]?.transcript ?? "";
-      if (transcript) {
-        setInput(transcript);
-        void handleSend(transcript); // auto-send
-      }
-    };
-    rec.onend = () => setRecording(false);
-    rec.onerror = () => setRecording(false);
-    recRef.current = rec;
-    setRecording(true);
-    rec.start();
-  }, []);
-  const stopRecording = useCallback(() => {
-    recRef.current?.stop();
-    setRecording(false);
-  }, []);
-
+  /** Send a question to the Copilot API */
   const handleSend = useCallback(async (text?: string) => {
     const content = (text ?? input).trim();
     if (!content || loading) return;
 
-    // clear old sources for the next answer
-    setLastSources([]);
+    setLastSources([]);           // clear previous sources
     setLoading(true);
     setMessages((m) => [...m, { role: "user", content }]);
     setInput("");
 
     try {
-      const history = messages.slice(-6); // keep it light
+      const history = messages.slice(-6); // keep context light
       const res = await fetch("/api/copilot", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -92,8 +73,6 @@ export default function VoicePage() {
       const reply = data.reply || "…";
       setMessages((m) => [...m, { role: "assistant", content: reply }]);
       setLastSources(Array.isArray(data.sources) ? data.sources : []);
-
-      // (optional) speak the answer
       speak(reply);
     } catch {
       setMessages((m) => [...m, { role: "assistant", content: "Network error. Please try again." }]);
@@ -102,13 +81,50 @@ export default function VoicePage() {
     }
   }, [input, loading, messages, speak]);
 
+  /** Minimal speech recognition using webkitSpeechRecognition if present */
+  const recRef = useRef<SpeechRecognitionInstance | null>(null);
+  const startRecording = useCallback(() => {
+    if (typeof window === "undefined") return;
+
+    const anyWin = window as unknown as {
+      SpeechRecognition?: SpeechRecognitionConstructor;
+      webkitSpeechRecognition?: SpeechRecognitionConstructor;
+    };
+    const Ctor = anyWin.SpeechRecognition || anyWin.webkitSpeechRecognition;
+    if (!Ctor) {
+      alert("Speech recognition not supported in this browser.");
+      return;
+    }
+
+    const rec = new Ctor();
+    rec.lang = "en-US";
+    rec.interimResults = false;
+    rec.maxAlternatives = 1;
+    rec.onresult = (e: SpeechRecognitionEventLike) => {
+      const transcript = e.results?.[0]?.[0]?.transcript ?? "";
+      if (transcript) {
+        setInput(transcript);
+        void handleSend(transcript); // auto-send
+      }
+    };
+    rec.onend = () => setRecording(false);
+    rec.onerror = () => setRecording(false);
+
+    recRef.current = rec;
+    setRecording(true);
+    rec.start();
+  }, [handleSend]);
+
+  const stopRecording = useCallback(() => {
+    recRef.current?.stop();
+    setRecording(false);
+  }, []);
+
   useEffect(() => {
     return () => {
-      // stop any TTS on unmount
       if (typeof window !== "undefined" && "speechSynthesis" in window) {
         window.speechSynthesis.cancel();
       }
-      // stop recognition on unmount
       recRef.current?.stop();
     };
   }, []);
@@ -130,7 +146,7 @@ export default function VoicePage() {
               {m.content}
             </div>
 
-            {/* Show sources under the LAST assistant message only */}
+            {/* Show sources under the MOST RECENT assistant message */}
             {idx === messages.length - 1 && m.role === "assistant" && lastSources.length > 0 && (
               <div className="mt-2 text-xs text-zinc-600">
                 <span className="mr-2">Sources:</span>
