@@ -10,7 +10,7 @@ type Source = { n: number; title: string; url: string };
 type Task = { title: string; type: string; due_date: string | null };
 type CopilotResponse = { reply: string; tasks?: Task[]; sources?: Source[]; error?: string };
 
-/** Minimal Web Speech types (no "any", no global augmentation) */
+/** Minimal Web Speech types (no global augmentation) */
 type SpeechRecognitionEventLike = {
   results: ArrayLike<{ 0: { transcript: string } }>;
 };
@@ -121,6 +121,17 @@ export default function VoicePage() {
     setRecording(false);
   }, []);
 
+  // Track source clicks (send instantly; mousedown fires before tab opens)
+  const trackSourceClick = useCallback((s: Source) => {
+    try {
+      posthog.capture(
+        "copilot_source_click",
+        { n: s.n, url: s.url, title: s.title, page: "voice" },
+        { send_instantly: true }
+      );
+    } catch {}
+  }, []);
+
   useEffect(() => {
     return () => {
       if (typeof window !== "undefined" && "speechSynthesis" in window) {
@@ -151,34 +162,24 @@ export default function VoicePage() {
             {idx === messages.length - 1 && m.role === "assistant" && lastSources.length > 0 && (
               <div className="mt-2 text-xs text-zinc-600">
                 <span className="mr-2">Sources:</span>
-{lastSources.map((s) => (
-  <a
-    key={s.n}
-    href={s.url}
-    target="_blank"
-    rel="noopener noreferrer"
-    title={s.title}
-    className="underline mr-2"
-    onMouseDown={() => trackSourceClick(s)}
-  >
-    [{s.n}]
-  </a>
-))}
-
+                {lastSources.map((s) => (
+                  <a
+                    key={s.n}
+                    href={s.url}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    title={s.title}
+                    className="underline mr-2"
+                    onMouseDown={() => trackSourceClick(s)}
+                  >
+                    [{s.n}]
+                  </a>
+                ))}
               </div>
             )}
           </div>
         ))}
       </div>
-const trackSourceClick = (s: Source) => {
-  try {
-    posthog.capture(
-      "copilot_source_click",
-      { n: s.n, url: s.url, title: s.title, page: "voice" },
-      { send_instantly: true } // bypass batching
-    );
-  } catch {}
-};
 
       <div className="mt-3 flex gap-2">
         <input
