@@ -2,18 +2,65 @@
 
 import { useEffect, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
-// If you have a Textarea/Input component, you can swap the native ones below.
 
 type Msg = { role: "user" | "assistant"; content: string };
+
+// --- Minimal Web Speech API typings (enough for our usage) ---
+interface SpeechRecognitionEventResult {
+  0: { transcript: string; confidence?: number };
+  isFinal: boolean;
+}
+interface SpeechRecognitionEventMap {
+  result: SpeechRecognitionEvent;
+  start: Event;
+  end: Event;
+  error: Event;
+}
+interface SpeechRecognitionEvent extends Event {
+  resultIndex: number;
+  results: {
+    length: number;
+    [index: number]: SpeechRecognitionEventResult;
+  };
+}
+interface SpeechRecognition {
+  lang: string;
+  interimResults: boolean;
+  continuous: boolean;
+  onstart: (() => void) | null;
+  onerror: ((ev: Event) => void) | null;
+  onend: (() => void) | null;
+  onresult: ((ev: SpeechRecognitionEvent) => void) | null;
+  start(): void;
+  stop(): void;
+  abort?(): void;
+}
+interface SpeechRecognitionConstructor {
+  new (): SpeechRecognition;
+}
+declare global {
+  interface Window {
+    SpeechRecognition?: SpeechRecognitionConstructor;
+    webkitSpeechRecognition?: SpeechRecognitionConstructor;
+    speechSynthesis: SpeechSynthesis;
+  }
+}
 
 function speak(text: string) {
   try {
     const u = new SpeechSynthesisUtterance(text);
-    u.rate = 1; u.pitch = 1; u.lang = "en-US";
+    u.rate = 1;
+    u.pitch = 1;
+    u.lang = "en-US";
     window.speechSynthesis.cancel();
     window.speechSynthesis.speak(u);
-  } catch {}
+  } catch {
+    // ignore TTS errors
+  }
 }
+
+type Source = { n: number; title: string; url: string };
+type ApiResponse = { reply: string; tasks?: unknown[]; sources?: Source[] };
 
 export default function VoiceCopilotPage() {
   const [supported, setSupported] = useState(false);
@@ -21,31 +68,40 @@ export default function VoiceCopilotPage() {
   const [interim, setInterim] = useState("");
   const [input, setInput] = useState("");
   const [messages, setMessages] = useState<Msg[]>([]);
-  const recRef = useRef<any>(null);
+  const recRef = useRef<SpeechRecognition | null>(null);
 
   useEffect(() => {
     const Rec =
-      (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+      window.SpeechRecognition ?? window.webkitSpeechRecognition;
     setSupported(Boolean(Rec));
   }, []);
 
   function startListening() {
-    // @ts-ignore
-    const Rec = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+    const Rec =
+      window.SpeechRecognition ?? window.webkitSpeechRecognition;
     if (!Rec) return;
     const rec = new Rec();
     rec.lang = "en-US";
     rec.interimResults = true;
     rec.continuous = false;
-    rec.onstart = () => { setListening(true); setInterim(""); };
-    rec.onerror = () => { setListening(false); };
-    rec.onend = () => { setListening(false); };
-    rec.onresult = (e: any) => {
+    rec.onstart = () => {
+      setListening(true);
+      setInterim("");
+    };
+    rec.onerror = () => {
+      setListening(false);
+    };
+    rec.onend = () => {
+      setListening(false);
+    };
+    rec.onresult = (e: SpeechRecognitionEvent) => {
       let finalText = "";
       let interimText = "";
       for (let i = e.resultIndex; i < e.results.length; i++) {
-        const t = e.results[i][0].transcript;
-        if (e.results[i].isFinal) finalText += t;
+        const r = e.results[i];
+        const t = r[0]?.transcript ?? "";
+        if (!t) continue;
+        if (r.isFinal) finalText += t;
         else interimText += t;
       }
       setInterim(interimText);
@@ -58,7 +114,11 @@ export default function VoiceCopilotPage() {
   }
 
   function stopListening() {
-    try { recRef.current?.stop(); } catch {}
+    try {
+      recRef.current?.stop();
+    } catch {
+      // ignore
+    }
     setListening(false);
   }
 
@@ -79,12 +139,16 @@ export default function VoiceCopilotPage() {
     if (!res.ok) {
       setMessages((m) => [
         ...m,
-        { role: "assistant", content: "Sorry, I had trouble answering. Please try again." },
+        {
+          role: "assistant",
+          content:
+            "Sorry, I had trouble answering. Please try again.",
+        },
       ]);
       return;
     }
 
-    const data: { reply: string; tasks?: any[]; sources?: { n: number; title: string; url: string }[] } = await res.json();
+    const data: ApiResponse = await res.json();
     const reply = data.reply ?? "";
     setMessages((m) => [...m, { role: "assistant", content: reply }]);
     speak(reply);
@@ -104,7 +168,10 @@ export default function VoiceCopilotPage() {
           </div>
         ) : (
           <>
-            <Button onClick={listening ? stopListening : startListening} variant={listening ? "secondary" : "default"}>
+            <Button
+              onClick={listening ? stopListening : startListening}
+              variant={listening ? "secondary" : "default"}
+            >
               {listening ? "Stop" : "🎤 Start"}
             </Button>
             <span className="text-sm text-zinc-600">
@@ -123,7 +190,9 @@ export default function VoiceCopilotPage() {
         />
         <div className="mt-2 flex gap-2">
           <Button onClick={send}>Ask Copilot</Button>
-          <Button variant="secondary" onClick={() => window.speechSynthesis.cancel()}>🔇 Stop speaking</Button>
+          <Button variant="secondary" onClick={() => window.speechSynthesis.cancel()}>
+            🔇 Stop speaking
+          </Button>
         </div>
       </div>
 
@@ -131,9 +200,13 @@ export default function VoiceCopilotPage() {
         {messages.map((m, i) => (
           <div
             key={i}
-            className={`rounded p-3 ${m.role === "user" ? "bg-zinc-100" : "bg-white border"}`}
+            className={`rounded p-3 ${
+              m.role === "user" ? "bg-zinc-100" : "bg-white border"
+            }`}
           >
-            <div className="text-xs text-zinc-500 mb-1">{m.role === "user" ? "You" : "Copilot"}</div>
+            <div className="text-xs text-zinc-500 mb-1">
+              {m.role === "user" ? "You" : "Copilot"}
+            </div>
             <div className="whitespace-pre-wrap break-words">{m.content}</div>
           </div>
         ))}
