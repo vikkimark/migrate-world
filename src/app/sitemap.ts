@@ -15,6 +15,7 @@ export default function sitemap(): MetadataRoute.Sitemap {
     "/checklist",
     "/terms", 
     "/privacy",
+    "/voice",
   ];
   return routes.map((path) => ({
     url: `${base}${path}`,
