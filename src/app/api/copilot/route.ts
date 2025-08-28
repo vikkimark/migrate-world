@@ -2,11 +2,23 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 
+export const dynamic = "force-dynamic";
+
 type Role = "system" | "user" | "assistant";
 type ChatMsg = { role: Role; content: string };
 type Task = {
   title: string;
-  type: "visa" | "housing" | "program" | "job" | "shop" | "flight" | "travel" | "health" | "education" | "custom";
+  type:
+    | "visa"
+    | "housing"
+    | "program"
+    | "job"
+    | "shop"
+    | "flight"
+    | "travel"
+    | "health"
+    | "education"
+    | "custom";
   due_date: string | null;
 };
 type KBChunk = { id: number; title: string; url: string; content: string };
@@ -32,13 +44,27 @@ Keep 3–7 tasks max; one fenced block only.
 `.trim();
 
 function extractTasks(reply: string): Task[] {
-  const valid: Task["type"][] = ["visa","housing","program","job","shop","flight","travel","health","education","custom"];
+  const valid: Task["type"][] = [
+    "visa",
+    "housing",
+    "program",
+    "job",
+    "shop",
+    "flight",
+    "travel",
+    "health",
+    "education",
+    "custom",
+  ];
+
   const toTask = (x: unknown): Task | null => {
     if (!x || typeof x !== "object") return null;
     const o = x as Record<string, unknown>;
     const title = typeof o.title === "string" ? o.title : "";
     const typeStr = typeof o.type === "string" ? o.type : "custom";
-    const type = (valid as readonly string[]).includes(typeStr) ? (typeStr as Task["type"]) : "custom";
+    const type = (valid as readonly string[]).includes(typeStr)
+      ? (typeStr as Task["type"])
+      : "custom";
     const rawDue = o.due_date;
     const due_date = typeof rawDue === "string" ? rawDue : null;
     return title ? { title, type, due_date } : null;
@@ -48,7 +74,8 @@ function extractTasks(reply: string): Task[] {
     // Try fenced ```json ... ```
     const fenced = reply.match(/```json([\s\S]*?)```/i);
     let raw = fenced ? fenced[1].trim() : "";
-    // Fallback: trailing {...}
+
+    // Fallback: trailing {...} at end of reply
     if (!raw) {
       const lastBrace = reply.lastIndexOf("{");
       if (lastBrace !== -1) {
@@ -57,10 +84,14 @@ function extractTasks(reply: string): Task[] {
       }
     }
     if (!raw) return [];
+
     const parsed = JSON.parse(raw) as unknown;
-    const arr = (parsed && typeof parsed === "object" && "tasks" in (parsed as Record<string, unknown>))
-      ? (parsed as { tasks?: unknown[] }).tasks
-      : [];
+    const arr =
+      parsed &&
+      typeof parsed === "object" &&
+      "tasks" in (parsed as Record<string, unknown>)
+        ? (parsed as { tasks?: unknown[] }).tasks
+        : [];
     if (!Array.isArray(arr)) return [];
     return arr.map(toTask).filter((t): t is Task => t !== null);
   } catch {
@@ -72,18 +103,26 @@ export async function POST(req: NextRequest) {
   // Env checks
   const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
   if (!OPENAI_API_KEY) {
-    return NextResponse.json({ error: "Missing OPENAI_API_KEY" }, { status: 500 });
+    return NextResponse.json(
+      { error: "Missing OPENAI_API_KEY" },
+      { status: 500 }
+    );
   }
   const SB_URL = process.env.NEXT_PUBLIC_SUPABASE_URL;
   const SB_ANON = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
-  if (!SB_URL || !SB_ANON) {
-    return NextResponse.json({ error: "Missing Supabase env" }, { status: 500 });
+  const SB_SERVICE = process.env.SUPABASE_SERVICE_ROLE;
+  if (!SB_URL || !SB_ANON || !SB_SERVICE) {
+    return NextResponse.json(
+      { error: "Missing Supabase env" },
+      { status: 500 }
+    );
   }
-const sb = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.SUPABASE_SERVICE_ROLE!,         // <-- server-side key
-  { auth: { persistSession: false, autoRefreshToken: false } }
-);
+
+  // Server-side Supabase (service role; bypasses RLS in this API route)
+  const sb = createClient(SB_URL, SB_SERVICE, {
+    auth: { persistSession: false, autoRefreshToken: false },
+  });
+
   // Input
   const body = await req.json().catch(() => ({} as unknown));
   const { message, history = [] as ChatMsg[] } = (body ?? {}) as {
@@ -91,65 +130,95 @@ const sb = createClient(
     history?: ChatMsg[];
   };
   if (!message || typeof message !== "string") {
-    return NextResponse.json({ error: "Missing 'message' string" }, { status: 400 });
+    return NextResponse.json(
+      { error: "Missing 'message' string" },
+      { status: 400 }
+    );
   }
 
   // Simple text search over kb_chunks (works without embeddings)
   let matches: KBChunk[] = [];
   try {
     const q = message.split(/\s+/).slice(0, 5).join("%");
-    const { data } = await sb
+    const { data, error } = await sb
       .from("kb_chunks")
       .select("id,title,url,content")
       .or(`content.ilike.%${q}%,title.ilike.%${q}%`)
-      .limit(5);
-    matches = (data ?? []).filter((m): m is KBChunk => !!m && typeof m.title === "string" && typeof m.url === "string");
+      .limit(8);
+
+    if (!error) {
+      matches = (data ?? []).filter(
+        (m): m is KBChunk =>
+          !!m &&
+          typeof m.title === "string" &&
+          typeof m.url === "string" &&
+          typeof m.content === "string"
+      );
+    }
   } catch {
     matches = [];
   }
 
-  // Optional inline context
+  // Optional inline context for the model
   const contextBlock = matches.length
-    ? "Context:\n" + matches.map((m, i) => `[${i + 1}] ${m.title} — ${m.url}`).join("\n")
+    ? "Context:\n" +
+      matches.map((m, i) => `[${i + 1}] ${m.title} — ${m.url}`).join("\n")
     : "";
 
   // Build chat messages
   const messages: ChatMsg[] = [
     { role: "system", content: SYSTEM_PROMPT },
-    ...(contextBlock ? [{ role: "system", content: contextBlock }] as ChatMsg[] : []),
+    ...(contextBlock ? [{ role: "system", content: contextBlock }] : []),
     ...history,
     { role: "user", content: message },
   ];
 
-  // Call OpenAI via fetch (keeps types simple)
-  const resp = await fetch("https://api.openai.com/v1/chat/completions", {
-    method: "POST",
-    headers: {
-      "Authorization": `Bearer ${OPENAI_API_KEY}`,
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({
-      model: "gpt-4o-mini",
-      temperature: 0.2,
-      messages,
-    }),
-  });
+  // Call OpenAI via fetch
+  let reply = "";
+  try {
+    const resp = await fetch("https://api.openai.com/v1/chat/completions", {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${OPENAI_API_KEY}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        model: "gpt-4o-mini",
+        temperature: 0.2,
+        messages,
+      }),
+    });
 
-  if (!resp.ok) {
-    const raw = await resp.text();
-    let msg = raw;
-    try { const j = JSON.parse(raw) as { error?: { message?: string } }; if (j?.error?.message) msg = j.error.message; } catch {}
-    return NextResponse.json({ error: msg || "OpenAI error" }, { status: 502 });
+    if (!resp.ok) {
+      const raw = await resp.text();
+      let msg = raw;
+      try {
+        const j = JSON.parse(raw) as { error?: { message?: string } };
+        if (j?.error?.message) msg = j.error.message;
+      } catch {}
+      return NextResponse.json({ error: msg || "OpenAI error" }, { status: 502 });
+    }
+
+    const data = (await resp.json()) as {
+      choices?: { message?: { content?: string } }[];
+    };
+    reply = data?.choices?.[0]?.message?.content ?? "";
+  } catch (e) {
+    return NextResponse.json(
+      { error: "Copilot is temporarily unavailable. Please try again." },
+      { status: 500 }
+    );
   }
-
-  const data = (await resp.json()) as { choices?: { message?: { content?: string } }[] };
-  const reply = data?.choices?.[0]?.message?.content ?? "";
 
   // Extract tasks + compact sources
   const tasks = extractTasks(reply);
   const sources: Source[] = matches
-    .map((m, i) => ({ n: i + 1, title: (m.title || "").slice(0, 120) || "Source", url: m.url || "" }))
-    .filter((s, idx, arr) => s.url && idx === arr.findIndex(t => t.url === s.url))
+    .map((m, i) => ({
+      n: i + 1,
+      title: (m.title || "").slice(0, 120) || "Source",
+      url: m.url || "",
+    }))
+    .filter((s, idx, arr) => s.url && idx === arr.findIndex((t) => t.url === s.url))
     .slice(0, 5);
 
   return NextResponse.json({ reply, tasks, sources });
