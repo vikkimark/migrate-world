@@ -79,8 +79,11 @@ export async function POST(req: NextRequest) {
   if (!SB_URL || !SB_ANON) {
     return NextResponse.json({ error: "Missing Supabase env" }, { status: 500 });
   }
-  const sb = createClient(SB_URL, SB_ANON);
-
+const sb = createClient(
+  process.env.NEXT_PUBLIC_SUPABASE_URL!,
+  process.env.SUPABASE_SERVICE_ROLE!,         // <-- server-side key
+  { auth: { persistSession: false, autoRefreshToken: false } }
+);
   // Input
   const body = await req.json().catch(() => ({} as unknown));
   const { message, history = [] as ChatMsg[] } = (body ?? {}) as {
