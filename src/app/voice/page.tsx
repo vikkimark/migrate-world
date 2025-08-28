@@ -1,235 +1,317 @@
 'use client';
 
-import { useCallback, useEffect, useRef, useState } from "react";
-import { posthog } from "@/lib/analytics";
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { Send, Mic, Volume2, Square } from 'lucide-react';
+import { posthog } from '@/lib/analytics';
 
-type Role = "user" | "assistant";
-type Msg = { role: Role; content: string };
-
+// ----- Types -----
 type Source = { n: number; title: string; url: string };
-type Task = { title: string; type: string; due_date: string | null };
-type CopilotResponse = { reply: string; tasks?: Task[]; sources?: Source[]; error?: string };
+type Msg = { role: 'user' | 'assistant'; content: string; sources?: Source[] };
 
-/** Minimal Web Speech types (no global augmentation) */
-type SpeechRecognitionEventLike = {
-  results: ArrayLike<{ 0: { transcript: string } }>;
-};
-type SpeechRecognitionInstance = {
-  lang: string;
-  interimResults: boolean;
-  maxAlternatives: number;
-  onresult: (e: SpeechRecognitionEventLike) => void;
-  onend: () => void;
-  onerror: () => void;
-  start: () => void;
-  stop: () => void;
-};
-type SpeechRecognitionConstructor = new () => SpeechRecognitionInstance;
+// Strip fenced ```json ... ``` block from the model text (we still parse tasks server-side)
+function stripTasksBlock(text: string): string {
+  return text.replace(/```json[\s\S]*?```/gi, '').trim();
+}
+
+// Turn any http(s):// links inside plain text into clickable <a> tags
+function linkify(
+  text: string,
+  onClick: (url: string, origin: 'inline') => void
+): (string | JSX.Element)[] {
+  const parts: (string | JSX.Element)[] = [];
+  const urlRegex = /(https?:\/\/[^\s)]+)(?=\)|\s|$)/gi;
+  let lastIndex = 0;
+  let match: RegExpExecArray | null;
+
+  while ((match = urlRegex.exec(text)) !== null) {
+    const [url] = match;
+    const start = match.index;
+    if (start > lastIndex) parts.push(text.slice(lastIndex, start));
+    parts.push(
+      <a
+        key={`${url}-${start}`}
+        href={url}
+        target="_blank"
+        rel="nofollow noopener noreferrer"
+        className="underline"
+        onClick={() => onClick(url, 'inline')}
+      >
+        {url}
+      </a>
+    );
+    lastIndex = start + url.length;
+  }
+  if (lastIndex < text.length) parts.push(text.slice(lastIndex));
+  return parts;
+}
 
 export default function VoicePage() {
-  const [messages, setMessages] = useState<Msg[]>([
-    { role: "assistant", content: "Hi! Ask me anything about moving to Canada (programs, visas, housing, jobs, essentials)." },
-  ]);
-  const [input, setInput] = useState("");
-  const [loading, setLoading] = useState(false);
-  const [lastSources, setLastSources] = useState<Source[]>([]);
-  const [recording, setRecording] = useState(false);
-  const [speaking, setSpeaking] = useState(false);
+  // UI state
+  const [input, setInput] = useState('');
+  const [sending, setSending] = useState(false);
+  const [messages, setMessages] = useState<Msg[]>([]); // no duplicate greeting
 
-  // Speak assistant replies (with start/end hooks)
+  // --- Text-to-speech (TTS) ---
+  const [speaking, setSpeaking] = useState(false);
+  const canSpeak = typeof window !== 'undefined' && 'speechSynthesis' in window;
+
   const stopSpeaking = useCallback(() => {
-    if (typeof window === "undefined") return;
-    if (!("speechSynthesis" in window)) return;
-    window.speechSynthesis.cancel();
+    try {
+      window.speechSynthesis?.cancel();
+    } catch {}
     setSpeaking(false);
   }, []);
 
-  const speak = useCallback((text: string) => {
-    if (typeof window === "undefined") return;
-    if (!("speechSynthesis" in window)) return;
-    const utter = new SpeechSynthesisUtterance(text);
-    utter.onstart = () => setSpeaking(true);
-    const clear = () => setSpeaking(false);
-    utter.onend = clear;
-    utter.onerror = clear;
-    window.speechSynthesis.cancel(); // stop anything currently speaking
-    window.speechSynthesis.speak(utter);
+  const speak = useCallback(
+    (text: string) => {
+      if (!canSpeak || !text) return;
+      try {
+        stopSpeaking();
+        const utter = new SpeechSynthesisUtterance(text);
+        utter.onend = () => setSpeaking(false);
+        utter.onerror = () => setSpeaking(false);
+        window.speechSynthesis.speak(utter);
+        setSpeaking(true);
+      } catch {
+        setSpeaking(false);
+      }
+    },
+    [canSpeak, stopSpeaking]
+  );
+
+  // --- Optional mic (webkitSpeechRecognition) ---
+  const recRef = useRef<any>(null);
+  const [listening, setListening] = useState(false);
+  const micSupported =
+    typeof window !== 'undefined' &&
+    ((window as any).webkitSpeechRecognition || (window as any).SpeechRecognition);
+
+  const startMic = useCallback(() => {
+    if (!micSupported) return;
+    const AnyWin = window as any;
+    const SR = AnyWin.webkitSpeechRecognition || AnyWin.SpeechRecognition;
+    if (!SR) return;
+    const rec = new SR();
+    rec.lang = 'en-US';
+    rec.interimResults = false;
+    rec.maxAlternatives = 1;
+    rec.onresult = (ev: any) => {
+      const text = ev?.results?.[0]?.[0]?.transcript || '';
+      if (text) setInput(prev => (prev ? prev + ' ' + text : text));
+    };
+    rec.onend = () => setListening(false);
+    rec.onerror = () => setListening(false);
+    recRef.current = rec;
+    setListening(true);
+    rec.start();
+  }, [micSupported]);
+
+  const stopMic = useCallback(() => {
+    try {
+      recRef.current?.stop?.();
+    } catch {}
+    setListening(false);
   }, []);
 
-  /** Send a question to the Copilot API */
-  const handleSend = useCallback(async (text?: string) => {
-    const content = (text ?? input).trim();
-    if (!content || loading) return;
+  // --- Send to API ---
+  const sendMessage = useCallback(async () => {
+    const message = input.trim();
+    if (!message || sending) return;
 
-    setLastSources([]);           // clear previous sources
-    setLoading(true);
-    setMessages((m) => [...m, { role: "user", content }]);
-    setInput("");
+    setSending(true);
+    setMessages(m => [...m, { role: 'user', content: message }]);
+    setInput('');
 
     try {
-      const history = messages.slice(-6); // keep context light
-      const res = await fetch("/api/copilot", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ message: content, history }),
+      const res = await fetch('/api/copilot', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ message }),
       });
 
       if (!res.ok) {
-        let msg = "Copilot error";
-        try { const j = await res.json(); if (j?.error) msg = j.error; } catch {}
-        setMessages((m) => [...m, { role: "assistant", content: msg }]);
-        setLoading(false);
-        return;
+        const raw = await res.text().catch(() => '');
+        let msg = raw;
+        try {
+          const j = JSON.parse(raw);
+          if (j?.error) msg = j.error;
+        } catch {}
+        throw new Error(msg || 'Unknown error');
       }
 
-      const data = (await res.json()) as CopilotResponse;
-      const reply = data.reply || "…";
-      setMessages((m) => [...m, { role: "assistant", content: reply }]);
-      setLastSources(Array.isArray(data.sources) ? data.sources : []);
-      speak(reply);
-    } catch {
-      setMessages((m) => [...m, { role: "assistant", content: "Network error. Please try again." }]);
+      const data: { reply: string; tasks?: unknown[]; sources?: Source[] } = await res.json();
+      const visibleReply = stripTasksBlock(data.reply || '');
+      const sources = Array.isArray(data.sources) ? data.sources : [];
+
+      setMessages(m => [...m, { role: 'assistant', content: visibleReply, sources }]);
+
+      // auto-speak latest answer
+      speak(visibleReply);
+    } catch (e) {
+      const msg = (e as Error)?.message || 'Copilot failed';
+      setMessages(m => [...m, { role: 'assistant', content: `Sorry — ${msg}` }]);
     } finally {
-      setLoading(false);
+      setSending(false);
     }
-  }, [input, loading, messages, speak]);
+  }, [input, sending, speak]);
 
-  /** Minimal speech recognition using webkitSpeechRecognition if present */
-  const recRef = useRef<SpeechRecognitionInstance | null>(null);
-  const startRecording = useCallback(() => {
-    if (typeof window === "undefined") return;
-
-    const anyWin = window as unknown as {
-      SpeechRecognition?: SpeechRecognitionConstructor;
-      webkitSpeechRecognition?: SpeechRecognitionConstructor;
-    };
-    const Ctor = anyWin.SpeechRecognition || anyWin.webkitSpeechRecognition;
-    if (!Ctor) {
-      alert("Speech recognition not supported in this browser.");
-      return;
-    }
-
-    const rec = new Ctor();
-    rec.lang = "en-US";
-    rec.interimResults = false;
-    rec.maxAlternatives = 1;
-    rec.onresult = (e: SpeechRecognitionEventLike) => {
-      const transcript = e.results?.[0]?.[0]?.transcript ?? "";
-      if (transcript) {
-        setInput(transcript);
-        void handleSend(transcript); // auto-send
+  // Enter to submit (not Shift+Enter)
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Enter' && !e.shiftKey) {
+        const el = document.activeElement as HTMLElement | null;
+        const isTyping =
+          el?.tagName === 'INPUT' || el?.tagName === 'TEXTAREA' || el?.getAttribute('contenteditable') === 'true';
+        if (isTyping) {
+          e.preventDefault();
+          (document.getElementById('voice-send-btn') as HTMLButtonElement | null)?.click();
+        }
       }
     };
-    rec.onend = () => setRecording(false);
-    rec.onerror = () => setRecording(false);
-
-    recRef.current = rec;
-    setRecording(true);
-    rec.start();
-  }, [handleSend]);
-
-  const stopRecording = useCallback(() => {
-    recRef.current?.stop();
-    setRecording(false);
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
   }, []);
 
-  // Track source clicks (send instantly; mousedown fires before tab opens)
-  const trackSourceClick = useCallback((s: Source) => {
+  // Track clicks
+  const onSourceClick = useCallback((s: Source, origin: 'list' | 'inline') => {
     try {
-      posthog.capture(
-        "copilot_source_click",
-        { n: s.n, url: s.url, title: s.title, page: "voice" },
-        { send_instantly: true }
-      );
+      posthog.capture('copilot_source_click', {
+        n: s.n,
+        url: s.url,
+        title: s.title,
+        page: 'voice',
+        origin,
+      });
     } catch {}
   }, []);
 
-  useEffect(() => {
-    return () => {
-      if (typeof window !== "undefined" && "speechSynthesis" in window) {
-        window.speechSynthesis.cancel();
-      }
-      recRef.current?.stop();
-    };
+  const onInlineClick = useCallback((url: string, origin: 'inline') => {
+    try {
+      posthog.capture('copilot_source_click', {
+        n: null,
+        url,
+        title: null,
+        page: 'voice',
+        origin,
+      });
+    } catch {}
   }, []);
 
   return (
-    <section className="max-w-2xl mx-auto p-4">
-      <h1 className="text-2xl font-semibold tracking-tight">Copilot (voice)</h1>
-      <p className="text-zinc-600 mt-1">Ask with text, or tap Speak and talk.</p>
+    <section className="max-w-2xl mx-auto py-8">
+      <h1 className="text-2xl font-semibold tracking-tight">Voice Copilot</h1>
+      <p className="text-zinc-600 mt-1">
+        Ask a question and I’ll answer. Click <span className="font-medium">Sources</span> to open official pages.
+        {canSpeak ? ' Audio playback will read the reply aloud.' : ' (Speech playback not supported by this browser.)'}
+      </p>
 
-      <div className="mt-4 space-y-3 border rounded p-3 bg-white">
-        {messages.map((m, idx) => (
-          <div key={idx} className={m.role === "user" ? "text-right" : "text-left"}>
+      <div className="mt-6 space-y-4">
+        {messages.map((m, i) => (
+          <div key={i} className={m.role === 'user' ? 'text-right' : ''}>
             <div
-              className={
-                "inline-block whitespace-pre-wrap rounded px-3 py-2 " +
-                (m.role === "user" ? "bg-zinc-900 text-white" : "bg-zinc-100")
-              }
+              className={`inline-block rounded px-4 py-3 max-w-full ${
+                m.role === 'user' ? 'bg-black text-white' : 'bg-zinc-100'
+              }`}
             >
-              {m.content}
-            </div>
-
-            {/* Show sources under the MOST RECENT assistant message */}
-            {idx === messages.length - 1 && m.role === "assistant" && lastSources.length > 0 && (
-              <div className="mt-2 text-xs text-zinc-600">
-                <span className="mr-2">Sources:</span>
-                {lastSources.map((s) => (
-                  <a
-                    key={s.n}
-                    href={s.url}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    title={s.title}
-                    className="underline mr-2"
-                    onMouseDown={() => trackSourceClick(s)}
-                  >
-                    [{s.n}]
-                  </a>
-                ))}
+              <div className="whitespace-pre-wrap break-words">
+                {/* Render text with inline linkification */}
+                {m.role === 'assistant'
+                  ? linkify(m.content, (url) => onInlineClick(url, 'inline'))
+                  : m.content}
               </div>
-            )}
+
+              {/* Dedicated Sources list from API (clickable + tracked) */}
+              {m.role === 'assistant' && m.sources && m.sources.length > 0 && (
+                <div className="mt-2 text-sm text-zinc-700">
+                  <div className="font-medium mb-1">Sources</div>
+                  <ul className="list-disc ml-5 space-y-1">
+                    {m.sources.map((s) => (
+                      <li key={s.n}>
+                        <a
+                          className="underline"
+                          href={s.url}
+                          target="_blank"
+                          rel="nofollow noopener noreferrer"
+                          onClick={() => onSourceClick(s, 'list')}
+                        >
+                          [{s.n}] {s.title}
+                        </a>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+            </div>
           </div>
         ))}
       </div>
 
-      <div className="mt-3 flex flex-wrap gap-2">
+      <form
+        className="mt-6 flex flex-wrap gap-2 items-stretch"
+        onSubmit={(e) => {
+          e.preventDefault();
+          sendMessage();
+        }}
+      >
         <input
-          className="flex-1 min-w-[220px] border rounded px-3 py-2"
-          placeholder="Type your question…"
           value={input}
           onChange={(e) => setInput(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === "Enter") void handleSend();
-          }}
+          placeholder="e.g., Canada study permit steps — cite sources"
+          className="flex-1 border rounded px-3 py-2 min-w-[200px]"
+          aria-label="Type your question"
         />
-        <button
-          className="border rounded px-3 py-2"
-          onClick={() => void handleSend()}
-          disabled={loading}
-          aria-label="Send"
-        >
-          {loading ? "…" : "Send"}
-        </button>
-        {!recording ? (
-          <button className="border rounded px-3 py-2" onClick={startRecording} aria-label="Speak">
-            🎤 Speak
-          </button>
-        ) : (
-          <button className="border rounded px-3 py-2" onClick={stopRecording} aria-label="Stop recording">
-            ⏹️ Stop recording
-          </button>
-        )}
-        {speaking && (
-          <button className="border rounded px-3 py-2" onClick={stopSpeaking} aria-label="Stop speaking">
-            🔇 Stop speaking
-          </button>
-        )}
-      </div>
 
-      <p className="mt-3 text-xs text-zinc-500">
-        Tip: ask about anything you’ve ingested on the Admin Ingest page to see citations.
-      </p>
+        <button
+          id="voice-send-btn"
+          type="submit"
+          disabled={sending || !input.trim()}
+          className="border rounded px-3 py-2 flex items-center gap-2"
+          title="Ask"
+          aria-label="Ask"
+        >
+          <Send size={16} />
+          {sending ? 'Sending…' : 'Ask'}
+        </button>
+
+        <button
+          type="button"
+          onClick={() => {
+            const last = [...messages].reverse().find(m => m.role === 'assistant');
+            speak(stripTasksBlock(last?.content || ''));
+          }}
+          disabled={!canSpeak || speaking}
+          className="border rounded px-3 py-2 flex items-center gap-2"
+          title="Speak latest reply"
+          aria-label="Speak latest reply"
+        >
+          <Volume2 size={16} />
+          Speak
+        </button>
+
+        <button
+          type="button"
+          onClick={stopSpeaking}
+          disabled={!canSpeak || !speaking}
+          className="border rounded px-3 py-2 flex items-center gap-2"
+          title="Stop speaking"
+          aria-label="Stop speaking"
+        >
+          <Square size={16} />
+          Stop
+        </button>
+
+        <button
+          type="button"
+          onClick={listening ? stopMic : startMic}
+          disabled={!micSupported}
+          className="border rounded px-3 py-2 flex items-center gap-2"
+          title={micSupported ? (listening ? 'Stop mic' : 'Start mic') : 'Mic not supported in this browser'}
+          aria-label="Toggle microphone"
+        >
+          <Mic size={16} />
+          {listening ? 'Listening…' : 'Mic'}
+        </button>
+      </form>
     </section>
   );
 }
