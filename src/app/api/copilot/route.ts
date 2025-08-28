@@ -166,12 +166,13 @@ export async function POST(req: NextRequest) {
     : "";
 
   // Build chat messages
-  const messages: ChatMsg[] = [
-    { role: "system", content: SYSTEM_PROMPT },
-    ...(contextBlock ? [{ role: "system", content: contextBlock }] : []),
-    ...history,
-    { role: "user", content: message },
-  ];
+const messages: ChatMsg[] = [
+  { role: "system", content: SYSTEM_PROMPT },
+  ...(contextBlock ? ([{ role: "system", content: contextBlock }] as ChatMsg[]) : []),
+  ...history,
+  { role: "user", content: message },
+];
+
 
   // Call OpenAI via fetch
   let reply = "";
