@@ -203,12 +203,14 @@ export async function POST(req: NextRequest) {
       choices?: { message?: { content?: string } }[];
     };
     reply = data?.choices?.[0]?.message?.content ?? "";
-  } catch (e) {
-    return NextResponse.json(
-      { error: "Copilot is temporarily unavailable. Please try again." },
-      { status: 500 }
-    );
-  }
+} catch (e) {
+  console.error("Copilot error:", e instanceof Error ? e.message : e);
+  return NextResponse.json(
+    { error: "Copilot is temporarily unavailable. Please try again." },
+    { status: 500 }
+  );
+}
+
 
   // Extract tasks + compact sources
   const tasks = extractTasks(reply);
