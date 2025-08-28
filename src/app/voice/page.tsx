@@ -34,13 +34,25 @@ export default function VoicePage() {
   const [loading, setLoading] = useState(false);
   const [lastSources, setLastSources] = useState<Source[]>([]);
   const [recording, setRecording] = useState(false);
+  const [speaking, setSpeaking] = useState(false);
 
-  // Speak assistant replies (if supported)
+  // Speak assistant replies (with start/end hooks)
+  const stopSpeaking = useCallback(() => {
+    if (typeof window === "undefined") return;
+    if (!("speechSynthesis" in window)) return;
+    window.speechSynthesis.cancel();
+    setSpeaking(false);
+  }, []);
+
   const speak = useCallback((text: string) => {
     if (typeof window === "undefined") return;
     if (!("speechSynthesis" in window)) return;
     const utter = new SpeechSynthesisUtterance(text);
-    window.speechSynthesis.cancel();
+    utter.onstart = () => setSpeaking(true);
+    const clear = () => setSpeaking(false);
+    utter.onend = clear;
+    utter.onerror = clear;
+    window.speechSynthesis.cancel(); // stop anything currently speaking
     window.speechSynthesis.speak(utter);
   }, []);
 
@@ -181,9 +193,9 @@ export default function VoicePage() {
         ))}
       </div>
 
-      <div className="mt-3 flex gap-2">
+      <div className="mt-3 flex flex-wrap gap-2">
         <input
-          className="flex-1 border rounded px-3 py-2"
+          className="flex-1 min-w-[220px] border rounded px-3 py-2"
           placeholder="Type your question…"
           value={input}
           onChange={(e) => setInput(e.target.value)}
@@ -204,8 +216,13 @@ export default function VoicePage() {
             🎤 Speak
           </button>
         ) : (
-          <button className="border rounded px-3 py-2" onClick={stopRecording} aria-label="Stop">
-            ⏹️ Stop
+          <button className="border rounded px-3 py-2" onClick={stopRecording} aria-label="Stop recording">
+            ⏹️ Stop recording
+          </button>
+        )}
+        {speaking && (
+          <button className="border rounded px-3 py-2" onClick={stopSpeaking} aria-label="Stop speaking">
+            🔇 Stop speaking
           </button>
         )}
       </div>
