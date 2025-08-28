@@ -5,6 +5,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Send, Mic, Volume2, Square } from 'lucide-react';
 import { posthog } from '@/lib/analytics';
+import type { ReactNode } from "react";
 
 // ----- Types -----
 type Source = { n: number; title: string; url: string };
@@ -19,8 +20,8 @@ function stripTasksBlock(text: string): string {
 function linkify(
   text: string,
   onClick: (url: string, origin: 'inline') => void
-): (string | JSX.Element)[] {
-  const parts: (string | JSX.Element)[] = [];
+): ReactNode[] {
+  const parts: ReactNode[] = [];
   const urlRegex = /(https?:\/\/[^\s)]+)(?=\)|\s|$)/gi;
   let lastIndex = 0;
   let match: RegExpExecArray | null;
