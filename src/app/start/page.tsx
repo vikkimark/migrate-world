@@ -5,6 +5,7 @@ import { supabase } from "@/lib/supabase";
 import Link from "next/link";
 import { toast } from "sonner";
 import { posthog } from "@/lib/analytics";
+const supabase = getSupabase();
 
 
 export default function StartPage() {

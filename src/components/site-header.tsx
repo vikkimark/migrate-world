@@ -5,6 +5,7 @@ import { useEffect, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { supabase } from "@/lib/supabase";
 import { posthog } from "@/lib/analytics";
+const supabase = getSupabase();
 
 export default function SiteHeader() {
   const [email, setEmail] = useState<string | null>(null);

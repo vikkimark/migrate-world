@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { supabase } from "@/lib/supabase";
 import { toast } from "sonner";
+const supabase = getSupabase();
 
 function stripJsonTasks(text: string) {
   // remove fenced ```json ... ``` blocks
