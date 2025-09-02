@@ -1,0 +1,33 @@
+projectName: migrate-world
+packageManager: npm
+repoInit: true
+nodeVersion: ">=20"
+
+createNextApp: false
+nextAppPath: "src/app"
+installTailwind: true
+addShadcn: true
+addFramerMotion: true
+addLucide: true
+addRecharts: false
+
+supabase:
+  useCLI: false
+  url: ""                  # REQUIRED – e.g., https://xyzcompany.supabase.co
+  anonKey: ""              # OPTIONAL for local dev
+  serviceRoleKey: ""       # OPTIONAL for seed scripts; keep secret
+  projectRef: ""           # OPTIONAL – e.g., abcdefghijklmn
+
+observability:
+  sentryDSN: ""            # OPTIONAL
+  posthogKey: ""           # OPTIONAL
+
+ci:
+  githubActions: true
+
+datasets:
+  universities: true
+  visas: true
+  jobs: false
+  housing: false
+  flights: false

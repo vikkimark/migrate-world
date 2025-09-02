@@ -1,0 +1,49 @@
+name: "Weekly ship — sync, health checks, ingest, deploy"
+
+steps:
+  # 0) Quick env peek (safe redaction for keys)
+  - type: info
+    keys:
+      - NEXT_PUBLIC_SUPABASE_URL
+      - SUPABASE_SERVICE_ROLE
+      - OPENAI_API_KEY
+
+  # 1) Sync & install
+  - type: cmd
+    run: git pull --rebase origin main
+  - type: cmd
+    run: npm ci
+  - type: cmd
+    run: npm run lint --if-present
+  - type: cmd
+    run: npm run build
+
+  # 2) Ingest (Canada-first, official sources + a few Ottawa/Toronto universities)
+  # If a page fails (rate-limit, etc.), continue the plan.
+  - type: ingest
+    title: "Carleton University — Undergraduate Admissions"
+    url: "https://admissions.carleton.ca/"
+    continueOnError: true
+
+  - type: ingest
+    title: "University of Ottawa — Admissions"
+    url: "https://www.uottawa.ca/admissions"
+    continueOnError: true
+
+  - type: ingest
+    title: "Algonquin College — International"
+    url: "https://www.algonquincollege.com/international/"
+    continueOnError: true
+
+  - type: ingest
+    title: "University of Toronto — Future Students (Apply)"
+    url: "https://future.utoronto.ca/apply/"
+    continueOnError: true
+
+  # 3) Small pause so logs settle
+  - type: sleep
+    ms: 1000
+
+  # 4) Deploy to production
+  - type: deploy
+    prod: true

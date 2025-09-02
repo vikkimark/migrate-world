@@ -1,5 +1,5 @@
 import * as dotenv from "dotenv";
-dotenv.config({ path: ".env.local", override: true });
+dotenv.config({ path: ".env.local" });
 
 import { createClient } from "@supabase/supabase-js";
 import OpenAI from "openai";
