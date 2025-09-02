@@ -1,9 +1,10 @@
 'use client';
 import { posthog } from "@/lib/analytics";
 import { useEffect, useMemo, useState } from "react";
-import { supabase } from "@/lib/supabase";
+import { getSupabase } from "@/lib/supabase";
 import { Button } from "@/components/ui/button";
 import { sleep } from "@/lib/sleep";
+const supabase = getSupabase();
 
 
 type VisaLink = {

@@ -1,10 +1,11 @@
 'use client';
 
 import { useState } from "react";
-import { supabase } from "@/lib/supabase";
+import { getSupabase } from "@/lib/supabase";
 import Link from "next/link";
 import { toast } from "sonner";
 import { posthog } from "@/lib/analytics";
+const supabase = getSupabase();
 
 
 export default function StartPage() {
